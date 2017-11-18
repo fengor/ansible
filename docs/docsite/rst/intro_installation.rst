@@ -3,14 +3,6 @@ Installation
 
 .. contents:: Topics
 
-.. _getting_ansible:
-
-Getting Ansible
-```````````````
-
-You may also wish to follow the `GitHub project <https://github.com/ansible/ansible>`_ if
-you have a GitHub account.  This is also where we keep the issue tracker for sharing
-bugs and feature ideas.
 
 .. _what_will_be_installed:
 
@@ -45,10 +37,10 @@ information about running from source.  It's not necessary to install the progra
 Control Machine Requirements
 ````````````````````````````
 
-Currently Ansible can be run from any machine with Python 2.6 or 2.7 installed (Windows isn't supported for the control machine).
+Currently Ansible can be run from any machine with Python 2 (versions 2.6 or 2.7) or Python 3 (versions 3.5 and higher) installed (Windows isn't supported for the control machine).
 
 .. note::
-  Ansible 2.2 introduces a tech preview of support for Python 3. For more information, see `Python 3 Support <http://docs.ansible.com/ansible/python_3_support.html>`_.
+  Ansible 2.2 introduces a tech preview of support for Python 3 (versions 3.5 and higher). For more information, see `Python 3 Support <http://docs.ansible.com/ansible/python_3_support.html>`_.
 
 This includes Red Hat, Debian, CentOS, OS X, any of the BSDs, and so on.
 
@@ -66,10 +58,9 @@ This includes Red Hat, Debian, CentOS, OS X, any of the BSDs, and so on.
 Managed Node Requirements
 `````````````````````````
 
-On the managed nodes, you need a way to communicate, which is normally ssh. By default this uses sftp. If that's not available, you can switch to scp in ansible.cfg.
-You also need Python 2.4 or later. If you are running less than Python 2.5 on the remotes, you will also need:
-
-* ``python-simplejson``
+On the managed nodes, you need a way to communicate, which is normally ssh. By
+default this uses sftp. If that's not available, you can switch to scp in
+:file:`ansible.cfg`.  You also need Python 2.6 or later.
 
 .. note::
 
@@ -91,7 +82,7 @@ You also need Python 2.4 or later. If you are running less than Python 2.5 on th
    Ansible 2.2 introduces a tech preview of support for Python 3. For more information, see `Python 3 Support <http://docs.ansible.com/ansible/python_3_support.html>`_.
 
    By default, Ansible uses Python 2 in order to maintain compatibility with older distributions
-   such as RHEL 5 and RHEL 6. However, some Linux distributions (Gentoo, Arch) may not have a
+   such as RHEL 6. However, some Linux distributions (Gentoo, Arch) may not have a
    Python 2.X interpreter installed by default.  On those systems, you should install one, and set
    the 'ansible_python_interpreter' variable in inventory (see :doc:`intro_inventory`) to point at your 2.X Python.  Distributions
    like Red Hat Enterprise Linux, CentOS, Fedora, and Ubuntu all have a 2.X interpreter installed
@@ -113,25 +104,27 @@ Installing the Control Machine
 Latest Release Via Yum
 ++++++++++++++++++++++
 
-RPMs are available from yum for `EPEL
-<http://fedoraproject.org/wiki/EPEL>`_ 6, 7, and currently supported
+.. note:: We've changed how the Ansible community packages are distributed.
+  For users of RHEL/CentOS/Scientific Linux version 7, the Ansible community RPM
+  package will transition from the EPEL repository to the Extras channel.  There will be no
+  change for version 6 of RHEL/CentOS/Scientific Linux since Extras is not a part of version 6.
+
+RPMs for RHEL7 are available from `the Extras channel <https://access.redhat.com/solutions/912213>`_.
+
+RPMs for RHEL6 are available from yum for `EPEL
+<http://fedoraproject.org/wiki/EPEL>`_ 6 and currently supported
 Fedora distributions.
 
-Ansible itself can manage earlier operating
-systems that contain Python 2.4 or higher (so also EL5).
+Ansible will also have RPMs/YUM-repo available `here <https://releases.ansible.com/ansible/rpm>`_.
 
-Fedora users can install Ansible directly, though if you are using RHEL or CentOS and have not already done so, `configure EPEL <http://fedoraproject.org/wiki/EPEL>`_
+Ansible version 2.4 can manage earlier operating
+systems that contain Python 2.6 or higher.
 
-.. code-block:: bash
-
-    # install the epel-release RPM if needed on CentOS, RHEL, or Scientific Linux
-    $ sudo yum install ansible
-
-You can also build an RPM yourself.  From the root of a checkout or tarball, use the ``make rpm`` command to build an RPM you can distribute and install. Make sure you have ``rpm-build``, ``make``, ``asciidoc``, ``git``, ``python-setuptools`` and ``python2-devel`` installed.
+You can also build an RPM yourself.  From the root of a checkout or tarball, use the ``make rpm`` command to build an RPM you can distribute and install.
 
 .. code-block:: bash
 
-    $ git clone git://github.com/ansible/ansible.git --recursive
+    $ git clone https://github.com/ansible/ansible.git
     $ cd ./ansible
     $ make rpm
     $ sudo rpm -Uvh ./rpm-build/ansible-*.noarch.rpm
@@ -147,12 +140,12 @@ To configure the PPA on your machine and install ansible run these commands:
 
 .. code-block:: bash
 
+    $ sudo apt-get update
     $ sudo apt-get install software-properties-common
     $ sudo apt-add-repository ppa:ansible/ansible
     $ sudo apt-get update
     $ sudo apt-get install ansible
 
-.. note:: For the older version 1.9 we use this ppa:ansible/ansible-1.9
 .. note:: On older Ubuntu distributions, "software-properties-common" is called "python-software-properties".
 
 Debian/Ubuntu packages can also be built from the source checkout, run:
@@ -270,7 +263,7 @@ Then install Ansible with [1]_::
 
 Or if you are looking for the latest development version::
 
-    pip install git+git://github.com/ansible/ansible.git@devel
+    pip install git+https://github.com/ansible/ansible.git@devel
 
 If you are installing on OS X Mavericks, you may encounter some noise from your compiler.  A workaround is to do the following::
 
@@ -286,6 +279,9 @@ Tarballs of Tagged Releases
 Packaging Ansible or wanting to build a local package yourself, but don't want to do a git checkout?  Tarballs of releases are available on the `Ansible downloads <http://releases.ansible.com/ansible>`_ page.
 
 These releases are also tagged in the `git repository <https://github.com/ansible/ansible/releases>`_ with the release version.
+
+
+
 
 .. _from_source:
 
@@ -305,12 +301,14 @@ open source projects.
    If you are intending to use Tower as the Control Machine, do not use a source install. Please use OS package manager (like ``apt/yum``) or ``pip`` to install a stable version.
 
 
-To install from source.
+To install from source, clone the Ansible git repository:
 
 .. code-block:: bash
 
-    $ git clone git://github.com/ansible/ansible.git --recursive
+    $ git clone https://github.com/ansible/ansible.git --recursive
     $ cd ./ansible
+
+Once git has cloned the Ansible repository, setup the Ansible environment:
 
 Using Bash:
 
@@ -330,9 +328,11 @@ If you don't have pip installed in your version of Python, install pip::
 
     $ sudo easy_install pip
 
-Ansible also uses the following Python modules that need to be installed [1]_::
+Ansible also uses the following Python modules that need to be installed [1]_:
 
-    $ sudo pip install paramiko PyYAML Jinja2 httplib2 six
+.. code-block:: bash
+
+    $ sudo pip install -r ./requirements.txt
 
 To update ansible checkouts, use pull-with-rebase so any local changes are replayed.
 
@@ -372,6 +372,16 @@ Now let's test things with a ping command:
 
 You can also use "sudo make install".
 
+.. _getting_ansible:
+
+Ansible on GitHub
+`````````````````
+
+You may also wish to follow the `GitHub project <https://github.com/ansible/ansible>`_ if
+you have a GitHub account.  This is also where we keep the issue tracker for sharing
+bugs and feature ideas.
+
+
 .. seealso::
 
    :doc:`intro_adhoc`
@@ -383,4 +393,4 @@ You can also use "sudo make install".
    `irc.freenode.net <http://irc.freenode.net>`_
        #ansible IRC chat channel
 
-.. [1] If you have issues with the "pycrypto" package install on Mac OSX, which is included as a dependency for paramiko, then you may need to try "CC=clang sudo -E pip install pycrypto".
+.. [1] If you have issues with the "pycrypto" package install on Mac OSX, then you may need to try ``CC=clang sudo -E pip install pycrypto``.

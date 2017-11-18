@@ -25,8 +25,42 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 # USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
+from ansible.module_utils._text import to_text
+from ansible.module_utils.basic import env_fallback, return_values
+from ansible.module_utils.network_common import to_list
+from ansible.module_utils.connection import exec_command
 
 _DEVICE_CONFIGS = {}
+
+vyos_provider_spec = {
+    'host': dict(),
+    'port': dict(type='int'),
+
+    'username': dict(fallback=(env_fallback, ['ANSIBLE_NET_USERNAME'])),
+    'password': dict(fallback=(env_fallback, ['ANSIBLE_NET_PASSWORD']), no_log=True),
+    'ssh_keyfile': dict(fallback=(env_fallback, ['ANSIBLE_NET_SSH_KEYFILE']), type='path'),
+
+    'timeout': dict(type='int'),
+}
+vyos_argument_spec = {
+    'provider': dict(type='dict', options=vyos_provider_spec),
+}
+vyos_top_spec = {
+    'host': dict(removed_in_version=2.9),
+    'port': dict(removed_in_version=2.9, type='int'),
+
+    'username': dict(removed_in_version=2.9),
+    'password': dict(removed_in_version=2.9, no_log=True),
+    'ssh_keyfile': dict(removed_in_version=2.9, type='path'),
+
+    'timeout': dict(removed_in_version=2.9, type='int'),
+}
+vyos_argument_spec.update(vyos_top_spec)
+
+
+def get_provider_argspec():
+    return vyos_provider_spec
+
 
 def get_config(module, target='commands'):
     cmd = ' '.join(['show configuration', target])
@@ -34,55 +68,58 @@ def get_config(module, target='commands'):
     try:
         return _DEVICE_CONFIGS[cmd]
     except KeyError:
-        rc, out, err = module.exec_command(cmd)
+        rc, out, err = exec_command(module, cmd)
         if rc != 0:
-            module.fail_json(msg='unable to retrieve current config', stderr=err)
-        cfg = str(out).strip()
+            module.fail_json(msg='unable to retrieve current config', stderr=to_text(err, errors='surrogate_or_strict'))
+        cfg = to_text(out, errors='surrogate_or_strict').strip()
         _DEVICE_CONFIGS[cmd] = cfg
         return cfg
 
+
 def run_commands(module, commands, check_rc=True):
     responses = list()
-
     for cmd in to_list(commands):
-        rc, out, err = module.exec_command(cmd)
+        rc, out, err = exec_command(module, cmd)
         if check_rc and rc != 0:
-            module.fail_json(msg=err, rc=rc)
-        responses.append(out)
+            module.fail_json(msg=to_text(err, errors='surrogate_or_strict'), rc=rc)
+        responses.append(to_text(out, errors='surrogate_or_strict'))
     return responses
 
-def load_config(module, commands, commit=False, comment=None, save=False):
-    rc, out, err = module.exec_command('configure')
+
+def load_config(module, commands, commit=False, comment=None):
+    rc, out, err = exec_command(module, 'configure')
     if rc != 0:
-        module.fail_json(msg='unable to enter configuration mode', output=err)
+        module.fail_json(msg='unable to enter configuration mode', output=to_text(err, errors='surrogate_or_strict'))
 
     for cmd in to_list(commands):
-        rc, out, err = module.exec_command(cmd, check_rc=False)
+        rc, out, err = exec_command(module, cmd)
         if rc != 0:
             # discard any changes in case of failure
-            module.exec_command('exit discard')
+            exec_command(module, 'exit discard')
             module.fail_json(msg='configuration failed')
 
     diff = None
     if module._diff:
-        rc, out, err = module.exec_command('compare')
+        rc, out, err = exec_command(module, 'compare')
+        out = to_text(out, errors='surrogate_or_strict')
         if not out.startswith('No changes'):
-            rc, out, err = module.exec_command('show')
-            diff = str(out).strip()
+            rc, out, err = exec_command(module, 'show')
+            diff = to_text(out, errors='surrogate_or_strict').strip()
 
     if commit:
         cmd = 'commit'
         if comment:
             cmd += ' comment "%s"' % comment
-        module.exec_command(cmd)
-
-    if save:
-        module.exec_command(cmd)
+        rc, out, err = exec_command(module, cmd)
+        if rc != 0:
+            # discard any changes in case of failure
+            exec_command(module, 'exit discard')
+            module.fail_json(msg='commit failed: %s' % err)
 
     if not commit:
-        module.exec_command('exit discard')
+        exec_command(module, 'exit discard')
     else:
-        module.exec_command('exit')
+        exec_command(module, 'exit')
 
     if diff:
         return diff

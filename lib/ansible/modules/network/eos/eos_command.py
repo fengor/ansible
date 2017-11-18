@@ -16,11 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
@@ -33,7 +32,9 @@ description:
     read from the device.  This module includes an
     argument that will cause the module to wait for a specific condition
     before returning or timing out if the condition is not met.
-extends_documentation_fragment: eos_local
+extends_documentation_fragment: eos
+notes:
+  - Tested against EOS 4.15
 options:
   commands:
     description:
@@ -95,7 +96,7 @@ EXAMPLES = """
     wait_for: result[0] contains Arista
 
 - name: run multiple commands on remote nodes
-   eos_command:
+  eos_command:
     commands:
       - show version
       - show interfaces
@@ -117,44 +118,33 @@ EXAMPLES = """
 """
 
 RETURN = """
+stdout:
+  description: The set of responses from the commands
+  returned: always apart from low level errors (such as action plugin)
+  type: list
+  sample: ['...', '...']
+stdout_lines:
+  description: The value of stdout split into a list
+  returned: always apart from low level errors (such as action plugin)
+  type: list
+  sample: [['...', '...'], ['...'], ['...']]
 failed_conditions:
-  description: the conditionals that failed
+  description: The list of conditionals that have failed
   returned: failed
   type: list
   sample: ['...', '...']
 """
 import time
 
-from functools import partial
-
-from ansible.module_utils import eos
-from ansible.module_utils import eos_local
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.local import LocalAnsibleModule
+from ansible.module_utils.pycompat24 import get_exception
 from ansible.module_utils.six import string_types
-
 from ansible.module_utils.netcli import Conditional
 from ansible.module_utils.network_common import ComplexList
-
-SHARED_LIB = 'eos'
+from ansible.module_utils.eos import run_commands
+from ansible.module_utils.eos import eos_argument_spec, check_args
 
 VALID_KEYS = ['command', 'output', 'prompt', 'response']
-
-def get_ansible_module():
-    if SHARED_LIB == 'eos':
-        return LocalAnsibleModule
-    return AnsibleModule
-
-def invoke(name, *args, **kwargs):
-    obj = globals().get(SHARED_LIB)
-    func = getattr(obj, name)
-    return func(*args, **kwargs)
-
-run_commands = partial(invoke, 'run_commands')
-
-def check_args(module, warnings):
-    if SHARED_LIB == 'eos_local':
-        eos_local.check_args(module, warnings)
 
 def to_lines(stdout):
     lines = list()
@@ -165,21 +155,24 @@ def to_lines(stdout):
     return lines
 
 def parse_commands(module, warnings):
-    transform = ComplexList(dict(
+    spec = dict(
         command=dict(key=True),
         output=dict(),
         prompt=dict(),
-        response=dict()
-    ))
+        answer=dict()
+    )
 
+    transform = ComplexList(spec, module)
     commands = transform(module.params['commands'])
 
-    for index, item in enumerate(commands):
-        if module.check_mode and not item['command'].startswith('show'):
-            warnings.append(
-                'Only show commands are supported when using check_mode, not '
-                'executing %s' % item['command']
-            )
+    if module.check_mode:
+        for item in list(commands):
+            if not item['command'].startswith('show'):
+                warnings.append(
+                    'Only show commands are supported when using check_mode, not '
+                    'executing %s' % item['command']
+                )
+                commands.remove(item)
 
     return commands
 
@@ -193,7 +186,6 @@ def main():
     """entry point for module execution
     """
     argument_spec = dict(
-        # { command: <str>, output: <str>, prompt: <str>, response: <str> }
         commands=dict(type='list', required=True),
 
         wait_for=dict(type='list', aliases=['waitfor']),
@@ -203,22 +195,26 @@ def main():
         interval=dict(default=1, type='int')
     )
 
-    argument_spec.update(eos_local.eos_local_argument_spec)
+    argument_spec.update(eos_argument_spec)
 
-    cls = get_ansible_module()
-    module = cls(argument_spec=argument_spec, supports_check_mode=True)
-
-    warnings = list()
-    check_args(module, warnings)
+    module = AnsibleModule(argument_spec=argument_spec,
+                           supports_check_mode=True)
 
     result = {'changed': False}
 
+    warnings = list()
+    check_args(module, warnings)
     commands = parse_commands(module, warnings)
     if warnings:
         result['warnings'] = warnings
 
     wait_for = module.params['wait_for'] or list()
-    conditionals = [Conditional(c) for c in wait_for]
+
+    try:
+        conditionals = [Conditional(c) for c in wait_for]
+    except AttributeError:
+        exc = get_exception()
+        module.fail_json(msg=str(exc))
 
     retries = module.params['retries']
     interval = module.params['interval']
@@ -255,5 +251,4 @@ def main():
 
 
 if __name__ == '__main__':
-    SHARED_LIB = 'eos_local'
     main()

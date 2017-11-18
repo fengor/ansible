@@ -1,22 +1,15 @@
 #!/usr/bin/python
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'certified'}
+
 
 DOCUMENTATION = '''
 ---
@@ -114,33 +107,33 @@ EXAMPLES = '''
 RETURN = '''
 creation_time:
     description: timestamp of creation date
-    returned:
-    type: datetime
-    sample: 2015-11-16 07:30:57-05:00
+    returned: always
+    type: string
+    sample: "2015-11-16 07:30:57-05:00"
 creation_token:
     description: EFS creation token
-    returned:
-    type: UUID
-    sample: console-88609e04-9a0e-4a2e-912c-feaa99509961
+    returned: always
+    type: string
+    sample: "console-88609e04-9a0e-4a2e-912c-feaa99509961"
 file_system_id:
     description: ID of the file system
-    returned:
-    type: unique ID
-    sample: fs-xxxxxxxx
+    returned: always
+    type: string
+    sample: "fs-xxxxxxxx"
 life_cycle_state:
     description: state of the EFS file system
-    returned:
-    type: str
-    sample: creating, available, deleting, deleted
+    returned: always
+    type: string
+    sample: "creating, available, deleting, deleted"
 mount_point:
     description: url of file system
-    returned:
-    type: str
-    sample: .fs-xxxxxxxx.efs.us-west-2.amazonaws.com:/
+    returned: always
+    type: string
+    sample: ".fs-xxxxxxxx.efs.us-west-2.amazonaws.com:/"
 mount_targets:
     description: list of mount targets
-    returned:
-    type: list of dicts
+    returned: always
+    type: list
     sample:
         [
             {
@@ -159,22 +152,22 @@ mount_targets:
         ]
 name:
     description: name of the file system
-    returned:
-    type: str
-    sample: my-efs
+    returned: always
+    type: string
+    sample: "my-efs"
 number_of_mount_targets:
     description: the number of targets mounted
-    returned:
+    returned: always
     type: int
     sample: 3
 owner_id:
     description: AWS account ID of EFS owner
-    returned:
-    type: str
-    sample: XXXXXXXXXXXX
+    returned: always
+    type: string
+    sample: "XXXXXXXXXXXX"
 size_in_bytes:
     description: size of the file system in bytes as of a timestamp
-    returned:
+    returned: always
     type: dict
     sample:
         {
@@ -183,12 +176,12 @@ size_in_bytes:
         }
 performance_mode:
     description: performance mode of the file system
-    returned:
-    type: str
+    returned: always
+    type: string
     sample: "generalPurpose"
 tags:
     description: tags on the efs instance
-    returned:
+    returned: always
     type: dict
     sample:
         {
@@ -198,17 +191,21 @@ tags:
 
 '''
 
-import sys
 from time import sleep
 from time import time as timestamp
-from collections import defaultdict
 
 try:
     from botocore.exceptions import ClientError
-    import boto3
-    HAS_BOTO3 = True
 except ImportError as e:
-    HAS_BOTO3 = False
+    pass  # Taken care of by ec2.HAS_BOTO3
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import (HAS_BOTO3, boto3_conn, camel_dict_to_snake_dict,
+                                      ec2_argument_spec, get_aws_connection_info)
+
+
+def _index_by_key(key, items):
+    return dict((item[key], item) for item in items)
 
 
 class EFSConnection(object):
@@ -242,6 +239,7 @@ class EFSConnection(object):
             **kwargs
         )
         for item in items:
+            item['Name'] = item['CreationToken']
             item['CreationTime'] = str(item['CreationTime'])
             """
             Suffix of network path to be used as NFS device for mount. More detail here:
@@ -392,19 +390,15 @@ class EFSConnection(object):
                 lambda: len(self.get_mount_targets_in_state(fs_id, incomplete_states)),
                 0
             )
-
-            index_by_subnet_id = lambda items: dict((item['SubnetId'], item) for item in items)
-
-            current_targets = index_by_subnet_id(self.get_mount_targets(FileSystemId=fs_id))
-            targets = index_by_subnet_id(targets)
+            current_targets = _index_by_key('SubnetId', self.get_mount_targets(FileSystemId=fs_id))
+            targets = _index_by_key('SubnetId', targets)
 
             targets_to_create, intersection, targets_to_delete = dict_diff(current_targets,
                                                                            targets, True)
 
-            """ To modify mount target it should be deleted and created again """
-            changed = filter(
-                lambda sid: not targets_equal(['SubnetId', 'IpAddress', 'NetworkInterfaceId'],
-                                              current_targets[sid], targets[sid]), intersection)
+            # To modify mount target it should be deleted and created again
+            changed = [sid for sid in intersection if not targets_equal(['SubnetId', 'IpAddress', 'NetworkInterfaceId'],
+                                                                        current_targets[sid], targets[sid])]
             targets_to_delete = list(targets_to_delete) + changed
             targets_to_create = list(targets_to_create) + changed
 
@@ -432,17 +426,16 @@ class EFSConnection(object):
                 )
                 result = True
 
-            security_groups_to_update = filter(
-                lambda sid: 'SecurityGroups' in targets[sid] and
-                            current_targets[sid]['SecurityGroups'] != targets[sid]['SecurityGroups'],
-                intersection
-            )
+            # If no security groups were passed into the module, then do not change it.
+            security_groups_to_update = [sid for sid in intersection if
+                                         'SecurityGroups' in targets[sid] and
+                                         current_targets[sid]['SecurityGroups'] != targets[sid]['SecurityGroups']]
 
             if security_groups_to_update:
                 for sid in security_groups_to_update:
                     self.connection.modify_mount_target_security_groups(
                         MountTargetId=current_targets[sid]['MountTargetId'],
-                        SecurityGroups=targets[sid]['SecurityGroups']
+                        SecurityGroups=targets[sid].get('SecurityGroups', None)
                     )
                 result = True
 
@@ -515,6 +508,9 @@ def iterate_all(attr, map_method, **kwargs):
                 sleep(wait)
                 wait = wait * 2
                 continue
+            else:
+                raise
+
 
 def targets_equal(keys, a, b):
     """
@@ -623,8 +619,6 @@ def main():
         result = camel_dict_to_snake_dict(result)
     module.exit_json(changed=changed, efs=result)
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

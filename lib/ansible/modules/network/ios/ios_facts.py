@@ -15,18 +15,17 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
 module: ios_facts
 version_added: "2.2"
 author: "Peter Sprygada (@privateip)"
-short_description: Collect facts from remote devices running IOS
+short_description: Collect facts from remote devices running Cisco IOS
 description:
   - Collects a base set of device facts from a remote device that
     is running IOS.  This module prepends all of the
@@ -34,6 +33,8 @@ description:
     module will always collect a base set of facts from the device
     and can enable or disable collection of additional facts.
 extends_documentation_fragment: ios
+notes:
+  - Tested against IOS 15.6
 options:
   gather_subset:
     description:
@@ -50,6 +51,7 @@ options:
 EXAMPLES = """
 # Note: examples below use the following provider dict to handle
 #       transport and authentication to the node.
+---
 vars:
   cli:
     host: "{{ inventory_hostname }}"
@@ -57,6 +59,7 @@ vars:
     password: cisco
     transport: cli
 
+---
 # Collect all facts from the device
 - ios_facts:
     gather_subset: all
@@ -143,32 +146,11 @@ ansible_net_neighbors:
 """
 import re
 
-from functools import partial
-
-from ansible.module_utils import ios
-from ansible.module_utils import ios_cli
+from ansible.module_utils.ios import run_commands
+from ansible.module_utils.ios import ios_argument_spec, check_args
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.local import LocalAnsibleModule
 from ansible.module_utils.six import iteritems
 from ansible.module_utils.six.moves import zip
-
-SHARED_LIB = 'ios'
-
-def get_ansible_module():
-    if SHARED_LIB == 'ios':
-        return LocalAnsibleModule
-    return AnsibleModule
-
-def invoke(name, *args, **kwargs):
-    obj = globals().get(SHARED_LIB)
-    func = getattr(obj, name)
-    return func(*args, **kwargs)
-
-run_commands = partial(invoke, 'run_commands')
-
-def check_args(module, warnings):
-    if SHARED_LIB == 'ios_cli':
-        ios_cli.check_args(module)
 
 
 class FactsBase(object):
@@ -202,7 +184,7 @@ class Default(FactsBase):
             self.facts['hostname'] = self.parse_hostname(data)
 
     def parse_version(self, data):
-        match = re.search(r'Version (\S+),', data)
+        match = re.search(r'Version (\S+?)(?:,\s|\s)', data)
         if match:
             return match.group(1)
 
@@ -230,8 +212,8 @@ class Default(FactsBase):
 class Hardware(FactsBase):
 
     COMMANDS = [
-        'dir | include Directory',
-        'show memory statistics | include Processor'
+        'dir',
+        'show memory statistics'
     ]
 
     def populate(self):
@@ -242,10 +224,12 @@ class Hardware(FactsBase):
 
         data = self.responses[1]
         if data:
-            match = re.findall(r'\s(\d+)\s', data)
+            processor_line = [l for l in data.splitlines()
+                              if 'Processor' in l].pop()
+            match = re.findall(r'\s(\d+)\s', processor_line)
             if match:
                 self.facts['memtotal_mb'] = int(match[0]) / 1024
-                self.facts['memfree_mb'] = int(match[1]) / 1024
+                self.facts['memfree_mb'] = int(match[3]) / 1024
 
     def parse_filesystems(self, data):
         return re.findall(r'^Directory of (\S+)/', data, re.M)
@@ -266,6 +250,7 @@ class Interfaces(FactsBase):
 
     COMMANDS = [
         'show interfaces',
+        'show ip interface',
         'show ipv6 interface',
         'show lldp'
     ]
@@ -284,11 +269,16 @@ class Interfaces(FactsBase):
         data = self.responses[1]
         if data:
             data = self.parse_interfaces(data)
-            self.populate_ipv6_interfaces(data)
+            self.populate_ipv4_interfaces(data)
 
         data = self.responses[2]
         if data:
-            neighbors = self.run('show lldp neighbors detail')
+            data = self.parse_interfaces(data)
+            self.populate_ipv6_interfaces(data)
+
+        data = self.responses[3]
+        if data:
+            neighbors = self.run(['show lldp neighbors detail'])
             if neighbors:
                 self.facts['neighbors'] = self.parse_neighbors(neighbors[0])
 
@@ -298,11 +288,6 @@ class Interfaces(FactsBase):
             intf = dict()
             intf['description'] = self.parse_description(value)
             intf['macaddress'] = self.parse_macaddress(value)
-
-            ipv4 = self.parse_ipv4(value)
-            intf['ipv4'] = self.parse_ipv4(value)
-            if ipv4:
-                self.add_ip_address(ipv4['address'], 'ipv4')
 
             intf['mtu'] = self.parse_mtu(value)
             intf['bandwidth'] = self.parse_bandwidth(value)
@@ -315,9 +300,28 @@ class Interfaces(FactsBase):
             facts[key] = intf
         return facts
 
+    def populate_ipv4_interfaces(self, data):
+        for key, value in data.items():
+            self.facts['interfaces'][key]['ipv4'] = list()
+            primary_address = addresses = []
+            primary_address = re.findall(r'Internet address is (.+)$', value, re.M)
+            addresses = re.findall(r'Secondary address (.+)$', value, re.M)
+            if len(primary_address) == 0:
+                continue
+            addresses.append(primary_address[0])
+            for address in addresses:
+                addr, subnet = address.split("/")
+                ipv4 = dict(address=addr.strip(), subnet=subnet.strip())
+                self.add_ip_address(addr.strip(), 'ipv4')
+                self.facts['interfaces'][key]['ipv4'].append(ipv4)
+
     def populate_ipv6_interfaces(self, data):
         for key, value in iteritems(data):
-            self.facts['interfaces'][key]['ipv6'] = list()
+            try:
+                self.facts['interfaces'][key]['ipv6'] = list()
+            except KeyError:
+                self.facts['interfaces'][key] = dict()
+                self.facts['interfaces'][key]['ipv6'] = list()
             addresses = re.findall(r'\s+(.+), subnet', value, re.M)
             subnets = re.findall(r', subnet is (.+)$', value, re.M)
             for addr, subnet in zip(addresses, subnets):
@@ -443,13 +447,10 @@ def main():
         gather_subset=dict(default=['!config'], type='list')
     )
 
-    argument_spec.update(ios_cli.ios_cli_argument_spec)
+    argument_spec.update(ios_argument_spec)
 
-    cls = get_ansible_module()
-    module = cls(argument_spec=argument_spec, supports_check_mode=True)
-
-    warnings = list()
-    check_args(module, warnings)
+    module = AnsibleModule(argument_spec=argument_spec,
+                           supports_check_mode=True)
 
     gather_subset = module.params['gather_subset']
 
@@ -500,9 +501,11 @@ def main():
         key = 'ansible_net_%s' % key
         ansible_facts[key] = value
 
-    module.exit_json(ansible_facts=ansible_facts)
+    warnings = list()
+    check_args(module, warnings)
+
+    module.exit_json(ansible_facts=ansible_facts, warnings=warnings)
 
 
 if __name__ == '__main__':
-    SHARED_LIB = 'ios_cli'
     main()

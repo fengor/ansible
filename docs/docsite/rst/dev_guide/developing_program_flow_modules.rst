@@ -277,7 +277,7 @@ substitutions:
 
   - :code:`"<<ANSIBLE_VERSION>>"` is substituted with the Ansible version.  In
     :ref:`new-style Python modules <flow_python_modules>` under the
-    :ref:`Ansiballz` frameworkthe proper way is to instead instantiate an
+    :ref:`Ansiballz` framework the proper way is to instead instantiate an
     :class:`AnsibleModule` and then access the version from
     :attr:``AnsibleModule.ansible_version``.
   - :code:`"<<INCLUDE_ANSIBLE_MODULE_COMPLEX_ARGS>>"` is substituted with
@@ -330,8 +330,8 @@ ansible module.
 .. note::
     Ansible wraps the zipfile in the Python script for two reasons:
 
-    * for compatibility with Python-2.4 and Python-2.6 which have less
-      featureful versions of Python's ``-m`` command line switch.
+    * for compatibility with Python-2.6 which has a less
+      functional version of Python's ``-m`` command line switch.
     * so that pipelining will function properly.  Pipelining needs to pipe the
       Python module into the Python interpreter on the remote node.  Python
       understands scripts on stdin but does not understand zip files.

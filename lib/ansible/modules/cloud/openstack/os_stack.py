@@ -3,23 +3,16 @@
 
 # (c) 2016, Mathieu Bultel <mbultel@redhat.com>
 # (c) 2016, Steve Baker <sbaker@redhat.com>
-#
-# This module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this software.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -66,6 +59,10 @@ options:
         - Maximum number of seconds to wait for the stack creation
       required: false
       default: 3600
+    availability_zone:
+      description:
+        - Ignored. Present for backwards compatibility
+      required: false
 requirements:
     - "python >= 2.6"
     - "shade"
@@ -86,12 +83,12 @@ EXAMPLES = '''
         bmc_flavor: m1.medium
         bmc_image: CentOS
         key_name: default
-        private_net: {{ private_net_param }}
+        private_net: "{{ private_net_param }}"
         node_count: 2
         name: undercloud
         image: CentOS
         my_flavor: m1.large
-        external_net: {{ external_net_param }}
+        external_net: "{{ external_net_param }}"
 '''
 
 RETURN = '''
@@ -99,63 +96,71 @@ id:
     description: Stack ID.
     type: string
     sample: "97a3f543-8136-4570-920e-fd7605c989d6"
+    returned: always
 
 stack:
-    action:
-        description: Action, could be Create or Update.
-        type: string
-        sample: "CREATE"
-    creation_time:
-        description: Time when the action has been made.
-        type: string
-        sample: "2016-07-05T17:38:12Z"
-    description:
-        description: Description of the Stack provided in the heat template.
-        type: string
-        sample: "HOT template to create a new instance and networks"
-    id:
-        description: Stack ID.
-        type: string
-        sample: "97a3f543-8136-4570-920e-fd7605c989d6"
-    name:
-        description: Name of the Stack
-        type: string
-        sample: "test-stack"
-    identifier:
-        description: Identifier of the current Stack action.
-        type: string
-        sample: "test-stack/97a3f543-8136-4570-920e-fd7605c989d6"
-    links:
-        description: Links to the current Stack.
-        type: list of dict
-        sample: "[{'href': 'http://foo:8004/v1/7f6a/stacks/test-stack/97a3f543-8136-4570-920e-fd7605c989d6']"
-    outputs:
-        description: Output returned by the Stack.
-        type: list of dict
-        sample: "{'description': 'IP address of server1 in private network',
-                    'output_key': 'server1_private_ip',
-                    'output_value': '10.1.10.103'}"
-    parameters:
-        description: Parameters of the current Stack
-        type: dict
-        sample: "{'OS::project_id': '7f6a3a3e01164a4eb4eecb2ab7742101',
-                    'OS::stack_id': '97a3f543-8136-4570-920e-fd7605c989d6',
-                    'OS::stack_name': 'test-stack',
-                    'stack_status': 'CREATE_COMPLETE',
-                    'stack_status_reason': 'Stack CREATE completed successfully',
-                    'status': 'COMPLETE',
-                    'template_description': 'HOT template to create a new instance and networks',
-                    'timeout_mins': 60,
-                    'updated_time': null}"
+    description: stack info
+    type: complex
+    returned: always
+    contains:
+        action:
+            description: Action, could be Create or Update.
+            type: string
+            sample: "CREATE"
+        creation_time:
+            description: Time when the action has been made.
+            type: string
+            sample: "2016-07-05T17:38:12Z"
+        description:
+            description: Description of the Stack provided in the heat template.
+            type: string
+            sample: "HOT template to create a new instance and networks"
+        id:
+            description: Stack ID.
+            type: string
+            sample: "97a3f543-8136-4570-920e-fd7605c989d6"
+        name:
+            description: Name of the Stack
+            type: string
+            sample: "test-stack"
+        identifier:
+            description: Identifier of the current Stack action.
+            type: string
+            sample: "test-stack/97a3f543-8136-4570-920e-fd7605c989d6"
+        links:
+            description: Links to the current Stack.
+            type: list of dict
+            sample: "[{'href': 'http://foo:8004/v1/7f6a/stacks/test-stack/97a3f543-8136-4570-920e-fd7605c989d6']"
+        outputs:
+            description: Output returned by the Stack.
+            type: list of dict
+            sample: "{'description': 'IP address of server1 in private network',
+                        'output_key': 'server1_private_ip',
+                        'output_value': '10.1.10.103'}"
+        parameters:
+            description: Parameters of the current Stack
+            type: dict
+            sample: "{'OS::project_id': '7f6a3a3e01164a4eb4eecb2ab7742101',
+                        'OS::stack_id': '97a3f543-8136-4570-920e-fd7605c989d6',
+                        'OS::stack_name': 'test-stack',
+                        'stack_status': 'CREATE_COMPLETE',
+                        'stack_status_reason': 'Stack CREATE completed successfully',
+                        'status': 'COMPLETE',
+                        'template_description': 'HOT template to create a new instance and networks',
+                        'timeout_mins': 60,
+                        'updated_time': null}"
 '''
 
-from time import sleep
 from distutils.version import StrictVersion
+
 try:
     import shade
     HAS_SHADE = True
 except ImportError:
     HAS_SHADE = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.openstack import openstack_full_argument_spec, openstack_module_kwargs
 
 
 def _create_stack(module, stack, cloud):
@@ -172,8 +177,7 @@ def _create_stack(module, stack, cloud):
         if stack.stack_status == 'CREATE_COMPLETE':
             return stack
         else:
-            return False
-            module.fail_json(msg = "Failure in creating stack: ".format(stack))
+            module.fail_json(msg="Failure in creating stack: {0}".format(stack))
     except shade.OpenStackCloudException as e:
         module.fail_json(msg=str(e))
 
@@ -262,7 +266,6 @@ def main():
     except shade.OpenStackCloudException as e:
         module.fail_json(msg=str(e))
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.openstack import *
+
 if __name__ == '__main__':
     main()

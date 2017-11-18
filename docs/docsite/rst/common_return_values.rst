@@ -3,10 +3,10 @@ Return Values
 
 .. contents:: Topics
 
-Ansible modules normally return a data structure that can be registered into a variable, or seen directly when output by 
+Ansible modules normally return a data structure that can be registered into a variable, or seen directly when output by
 the `ansible` program. Each module can optionally document its own unique return values (visible through ansible-doc and https://docs.ansible.com).
 
-This document covers return values common to all modules. 
+This document covers return values common to all modules.
 
 .. note:: Some of these keys might be set by Ansible itself once it processes the module's return information.
 
@@ -54,7 +54,7 @@ Some modules execute command line utilities or are geared for executing commands
 
 stderr_lines
 ````````````
-When c(stderr) is returned we also always provide this field which is a list of strings, one item per line from the original.
+When `stderr` is returned we also always provide this field which is a list of strings, one item per line from the original.
 
 stdout
 ``````
@@ -62,7 +62,7 @@ Some modules execute command line utilities or are geared for executing commands
 
 stdout_lines
 ````````````
-When c(stdout) is returned, Ansible always provides a list of strings, each containing one item per line from the original output.
+When `stdout` is returned, Ansible always provides a list of strings, each containing one item per line from the original output.
 
 
 .. _internal_return_values:
@@ -83,6 +83,10 @@ This key can contain traceback information caused by an exception in a module. I
 warnings
 ````````
 This key contains a list of strings that will be presented to the user.
+
+deprecations
+````````````
+This key contains a list of dictionaries that will be presented to the user. Keys of the dictionaries are `msg` and `version`, values are string, value for the `version` key can be an empty string.
 
 .. seealso::
 

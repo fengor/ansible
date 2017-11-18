@@ -13,7 +13,7 @@ Ansible contains a number of extra modules for interacting with CloudStack based
 
 Prerequisites
 `````````````
-Prerequisites for using the CloudStack modules are minimal. In addition to ansible itself, all of the modules require the python library ``cs`` https://pypi.python.org/pypi/cs.
+Prerequisites for using the CloudStack modules are minimal. In addition to Ansible itself, all of the modules require the python library ``cs`` https://pypi.python.org/pypi/cs.
 
 You'll need this Python module installed on the execution host, usually your workstation.
 
@@ -21,11 +21,17 @@ You'll need this Python module installed on the execution host, usually your wor
 
     $ pip install cs
 
+Or alternatively starting with Debian 9 and Ubuntu 16.04:
+
+.. code-block:: bash
+
+    $ sudo apt install python-cs
+
 .. note:: cs also includes a command line interface for ad-hoc interaction with the CloudStack API e.g. ``$ cs listVirtualMachines state=Running``.
 
 Limitations and Known Issues
 ````````````````````````````
-VPC support is not yet fully implemented and tested. The community is working on the VPC integration.
+VPC support has been improved since Ansible 2.3 but is still not yet fully implemented. The community is working on the VPC integration.
 
 Credentials File
 ````````````````
@@ -46,8 +52,35 @@ The structure of the ini file must look like this:
     endpoint = https://cloud.example.com/client/api
     key = api key
     secret = api secret
+    timeout = 30
 
 .. Note:: The section ``[cloudstack]`` is the default section. ``CLOUDSTACK_REGION`` environment variable can be used to define the default section.
+
+.. versionadded:: 2.4
+
+The ENV variables support ``CLOUDSTACK_*`` as written in the documentation of the library ``cs``,  like e.g ``CLOUDSTACK_TIMEOUT``, ``CLOUDSTACK_METHOD``, etc. has been implemented into Ansible. It is even possible to have some incomplete config in your cloudstack.ini:
+
+.. code-block:: bash
+
+    $ cat $HOME/.cloudstack.ini
+    [cloudstack]
+    endpoint = https://cloud.example.com/client/api
+    timeout = 30
+
+and fulfill the missing data by either setting ENV variables or tasks params:
+
+.. code-block:: yaml
+
+    ---
+    - name: provision our VMs
+      hosts: cloud-vm
+      connection: local
+      tasks:
+        - name: ensure VMs are created and running
+          cs_instance:
+            api_key: your api key
+            api_secret: your api secret
+            ...
 
 Regions
 ```````
@@ -92,7 +125,7 @@ Or by looping over a regions list if you want to do the task in every region:
         name: my-ssh-key
         public_key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
         api_region: "{{ item }}"
-        with_items:
+        loop:
           - exoscale
           - exmaple_cloud_one
           - exmaple_cloud_two
@@ -132,7 +165,7 @@ Below you see an example how it can be used in combination with Ansible's block 
 
 .. Note:: You are still able overwrite the environment variables using the module arguments, e.g. ``zone: sf-2``
 
-.. Note:: Unlike ``CLOUDSTACK_REGION`` these additional environment variables are ingored in the CLI ``cs``.
+.. Note:: Unlike ``CLOUDSTACK_REGION`` these additional environment variables are ignored in the CLI ``cs``.
 
 Use Cases
 `````````
@@ -222,14 +255,14 @@ Now to the fun part. We create a playbook to create our infrastructure we call i
             ip_address: "{{ public_ip }}"
             port: "{{ item.port }}"
             cidr: "{{ item.cidr | default('0.0.0.0/0') }}"
-          with_items: "{{ cs_firewall }}"
+          loop: "{{ cs_firewall }}"
           when: public_ip is defined
 
         - name: ensure static NATs
           cs_staticnat: vm="{{ inventory_hostname_short }}" ip_address="{{ public_ip }}"
           when: public_ip is defined
 
-In the above play we defined 3 tasks and use the group ``cloud-vm`` as target to handle all VMs in the cloud but instead SSH to these VMs, we use ``connetion=local`` to execute the API calls locally from our workstation.
+In the above play we defined 3 tasks and use the group ``cloud-vm`` as target to handle all VMs in the cloud but instead SSH to these VMs, we use ``connection=local`` to execute the API calls locally from our workstation.
 
 In the first task, we ensure we have a running VM created with the Debian template. If the VM is already created but stopped, it would just start it. If you like to change the offering on an existing VM, you must add ``force: yes`` to the task, which would stop the VM, change the offering and start the VM again.
 
@@ -293,7 +326,7 @@ The playbook looks like the following:
       - name: ensure security groups exist
         cs_securitygroup:
           name: "{{ item }}"
-        with_items:
+        loop:
           - default
           - web
 
@@ -302,7 +335,7 @@ The playbook looks like the following:
           security_group: default
           start_port: "{{ item }}"
           end_port: "{{ item }}"
-        with_items:
+        loop:
           - 22
 
       - name: add inbound TCP rules to security group web
@@ -310,7 +343,7 @@ The playbook looks like the following:
           security_group: web
           start_port: "{{ item }}"
           end_port: "{{ item }}"
-        with_items:
+        loop:
           - 80
           - 443
 
@@ -331,12 +364,12 @@ The playbook looks like the following:
       - name: show VM IP
         debug: msg="VM {{ inventory_hostname }} {{ vm.default_ip }}"
 
-      - name: assing IP to the inventory
+      - name: assign IP to the inventory
         set_fact: ansible_ssh_host={{ vm.default_ip }}
 
       - name: waiting for SSH to come up
         wait_for: port=22 host={{ vm.default_ip }} delay=5
 
-In the first play we setup the security groups, in the second play the VMs will created be assigned to these groups. Further you see, that we assign the public IP returned from the modules to the host inventory. This is needed as we do not know the IPs we will get in advance. In a next step you would configure the DNS servers with these IPs for accassing the VMs with their DNS name.
+In the first play we setup the security groups, in the second play the VMs will created be assigned to these groups. Further you see, that we assign the public IP returned from the modules to the host inventory. This is needed as we do not know the IPs we will get in advance. In a next step you would configure the DNS servers with these IPs for accessing the VMs with their DNS name.
 
 In the last task we wait for SSH to be accessible, so any later play would be able to access the VM by SSH without failure.

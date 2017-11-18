@@ -26,9 +26,9 @@ import time
 from abc import ABCMeta, abstractmethod
 from datetime import datetime
 from distutils.version import LooseVersion
-from enum import Enum
 
 try:
+    from enum import Enum  # enum is a ovirtsdk4 requirement
     import ovirtsdk4 as sdk
     import ovirtsdk4.version as sdk_version
     HAS_SDK = LooseVersion(sdk_version.VERSION) >= LooseVersion('4.0.0')
@@ -110,6 +110,15 @@ def get_dict_of_struct(struct, connection=None, fetch_nested=False, attributes=N
     return res
 
 
+def engine_version(connection):
+    """
+    Return string representation of oVirt engine version.
+    """
+    engine_api = connection.system_service().get()
+    engine_version = engine_api.product_info.version
+    return '%s.%s' % (engine_version.major, engine_version.minor)
+
+
 def create_connection(auth):
     """
     Create a connection to Python SDK, from task `auth` parameter.
@@ -134,6 +143,7 @@ def create_connection(auth):
         insecure=auth.get('insecure', False),
         token=auth.get('token', None),
         kerberos=auth.get('kerberos', None),
+        headers=auth.get('headers', None),
     )
 
 
@@ -391,13 +401,8 @@ def check_params(module):
         module.fail_json(msg='"name" or "id" is required')
 
 
-def engine_version(connection):
-    """
-    Return string representation of oVirt engine version.
-    """
-    engine_api = connection.system_service().get()
-    engine_version = engine_api.product_info.version
-    return '%s.%s' % (engine_version.major, engine_version.minor)
+def engine_supported(connection, version):
+    return LooseVersion(engine_version(connection)) >= LooseVersion(version)
 
 
 def check_support(version, connection, module, params):
@@ -500,8 +505,15 @@ class BaseModule(object):
                 after[k] = update[k]
         return after
 
-
-    def create(self, entity=None, result_state=None, fail_condition=lambda e: False, search_params=None, **kwargs):
+    def create(
+        self,
+        entity=None,
+        result_state=None,
+        fail_condition=lambda e: False,
+        search_params=None,
+        update_params=None,
+        **kwargs
+    ):
         """
         Method which is called when state of the entity is 'present'. If user
         don't provide `entity` parameter the entity is searched using
@@ -517,6 +529,7 @@ class BaseModule(object):
         :param result_state: State which should entity has in order to finish task.
         :param fail_condition: Function which checks incorrect state of entity, if it returns `True` Exception is raised.
         :param search_params: Dictionary of parameters to be used for search.
+        :param update_params: The params which should be passed to update method.
         :param kwargs: Additional parameters passed when creating entity.
         :return: Dictionary with values returned by Ansible module.
         """
@@ -531,10 +544,14 @@ class BaseModule(object):
             if not self.update_check(entity):
                 new_entity = self.build_entity()
                 if not self._module.check_mode:
-                    updated_entity = entity_service.update(new_entity)
+                    update_params = update_params or {}
+                    updated_entity = entity_service.update(
+                        new_entity,
+                        **update_params
+                    )
                     self.post_update(entity)
 
-                # Update diffs only if user specified --diff paramter,
+                # Update diffs only if user specified --diff parameter,
                 # so we don't useless overload API:
                 if self._module._diff:
                     before = get_dict_of_struct(
@@ -562,9 +579,14 @@ class BaseModule(object):
         # Wait for the entity to be created and to be in the defined state:
         entity_service = self._service.service(entity.id)
 
-        state_condition = lambda entity: entity
+        def state_condition(entity):
+            return entity
+
         if result_state:
-            state_condition = lambda entity: entity and entity.status == result_state
+
+            def state_condition(entity):
+                return entity and entity.status == result_state
+
         wait(
             service=entity_service,
             condition=state_condition,
@@ -724,6 +746,17 @@ class BaseModule(object):
             'diff': self._diff,
         }
 
+    def wait_for_import(self, condition=lambda e: True):
+        if self._module.params['wait']:
+            start = time.time()
+            timeout = self._module.params['timeout']
+            poll_interval = self._module.params['poll_interval']
+            while time.time() < start + timeout:
+                entity = self.search_entity()
+                if entity and condition(entity):
+                    return entity
+                time.sleep(poll_interval)
+
     def search_entity(self, search_params=None):
         """
         Always first try to search by `ID`, if ID isn't specified,
@@ -733,10 +766,10 @@ class BaseModule(object):
         entity = None
 
         if 'id' in self._module.params and self._module.params['id'] is not None:
-            entity = search_by_attributes(self._service, id=self._module.params['id'])
+            entity = get_entity(self._service.service(self._module.params['id']))
         elif search_params is not None:
             entity = search_by_attributes(self._service, **search_params)
-        elif 'name' in self._module.params and self._module.params['name'] is not None:
+        elif self._module.params.get('name') is not None:
             entity = search_by_attributes(self._service, name=self._module.params['name'])
 
         return entity

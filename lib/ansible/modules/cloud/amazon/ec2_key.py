@@ -1,23 +1,16 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['stableinterface'],
+                    'supported_by': 'certified'}
+
 
 DOCUMENTATION = '''
 ---
@@ -35,6 +28,12 @@ options:
     description:
       - Public key material.
     required: false
+  force:
+    description:
+      - Force overwrite of already existing key pair if key has changed.
+    required: false
+    default: true
+    version_added: "2.3"
   state:
     description:
       - create or delete keypair
@@ -63,46 +62,73 @@ author: "Vincent Viallet (@zbal)"
 '''
 
 EXAMPLES = '''
-# Note: None of these examples set aws_access_key, aws_secret_key, or region.
-# It is assumed that their matching environment variables are set.
+# Note: These examples do not set authentication details, see the AWS Guide for details.
 
-# Creates a new ec2 key pair named `example` if not present, returns generated
-# private key
-- name: example ec2 key
+- name: create a new ec2 key pair, returns generated private key
   ec2_key:
-    name: example
+    name: my_keypair
 
-# Creates a new ec2 key pair named `example` if not present using provided key
-# material.  This could use the 'file' lookup plugin to pull this off disk.
-- name: example2 ec2 key
+- name: create key pair using provided key_material
   ec2_key:
-    name: example2
+    name: my_keypair
     key_material: 'ssh-rsa AAAAxyz...== me@example.com'
-    state: present
 
-# Creates a new ec2 key pair named `example` if not present using provided key
-# material
-- name: example3 ec2 key
+- name: create key pair using key_material obtained using 'file' lookup plugin
   ec2_key:
-    name: example3
-    key_material: "{{ item }}"
-  with_file: /path/to/public_key.id_rsa.pub
+    name: my_keypair
+    key_material: "{{ lookup('file', '/path/to/public_key/id_rsa.pub') }}"
 
-# Removes ec2 key pair by name
-- name: remove example key
+# try creating a key pair with the name of an already existing keypair
+# but don't overwrite it even if the key is different (force=false)
+- name: try creating a key pair with name of an already existing keypair
   ec2_key:
-    name: example
+    name: my_existing_keypair
+    key_material: 'ssh-rsa AAAAxyz...== me@example.com'
+    force: false
+
+- name: remove key pair by name
+  ec2_key:
+    name: my_keypair
     state: absent
 '''
 
-try:
-    import boto.ec2
-    HAS_BOTO = True
-except ImportError:
-    HAS_BOTO = False
+RETURN = '''
+changed:
+  description: whether a keypair was created/deleted
+  returned: always
+  type: bool
+  sample: true
+key:
+  description: details of the keypair (this is set to null when state is absent)
+  returned: always
+  type: complex
+  contains:
+    fingerprint:
+      description: fingerprint of the key
+      returned: when state is present
+      type: string
+      sample: 'b0:22:49:61:d9:44:9d:0c:7e:ac:8a:32:93:21:6c:e8:fb:59:62:43'
+    name:
+      description: name of the keypair
+      returned: when state is present
+      type: string
+      sample: my_keypair
+    private_key:
+      description: private key of a newly created keypair
+      returned: when a new keypair is created by AWS (key_material is not provided)
+      type: string
+      sample: '-----BEGIN RSA PRIVATE KEY-----
+        MIIEowIBAAKC...
+        -----END RSA PRIVATE KEY-----'
+'''
 
 import random
 import string
+import time
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import HAS_BOTO, ec2_argument_spec, ec2_connect
+from ansible.module_utils._text import to_bytes
 
 
 def main():
@@ -110,9 +136,10 @@ def main():
     argument_spec.update(dict(
         name=dict(required=True),
         key_material=dict(required=False),
-        state = dict(default='present', choices=['present', 'absent']),
-        wait = dict(type='bool', default=False),
-        wait_timeout = dict(default=300),
+        force=dict(required=False, type='bool', default=True),
+        state=dict(default='present', choices=['present', 'absent']),
+        wait=dict(type='bool', default=False),
+        wait_timeout=dict(default=300),
     )
     )
     module = AnsibleModule(
@@ -126,6 +153,7 @@ def main():
     name = module.params['name']
     state = module.params.get('state')
     key_material = module.params.get('key_material')
+    force = module.params.get('force')
     wait = module.params.get('wait')
     wait_timeout = int(module.params.get('wait_timeout'))
 
@@ -162,7 +190,7 @@ def main():
     elif state == 'present':
         if key:
             # existing key found
-            if key_material:
+            if key_material and force:
                 # EC2's fingerprints are non-trivial to generate, so push this key
                 # to a temporary name and make ec2 calculate the fingerprint for us.
                 #
@@ -172,12 +200,12 @@ def main():
                 # find an unused name
                 test = 'empty'
                 while test:
-                    randomchars = [random.choice(string.ascii_letters + string.digits) for x in range(0,10)]
+                    randomchars = [random.choice(string.ascii_letters + string.digits) for x in range(0, 10)]
                     tmpkeyname = "ansible-" + ''.join(randomchars)
                     test = ec2.get_key_pair(tmpkeyname)
 
                 # create tmp key
-                tmpkey = ec2.import_key_pair(tmpkeyname, key_material)
+                tmpkey = ec2.import_key_pair(tmpkeyname, to_bytes(key_material))
                 # get tmp key fingerprint
                 tmpfingerprint = tmpkey.fingerprint
                 # delete tmp key
@@ -186,7 +214,7 @@ def main():
                 if key.fingerprint != tmpfingerprint:
                     if not module.check_mode:
                         key.delete()
-                        key = ec2.import_key_pair(name, key_material)
+                        key = ec2.import_key_pair(name, to_bytes(key_material))
 
                         if wait:
                             start = time.time()
@@ -200,7 +228,6 @@ def main():
                                 module.fail_json(msg="timed out while waiting for the key to be re-created")
 
                     changed = True
-            pass
 
         # if the key doesn't exist, create it now
         else:
@@ -208,7 +235,7 @@ def main():
             if not module.check_mode:
                 if key_material:
                     '''We are providing the key, need to import'''
-                    key = ec2.import_key_pair(name, key_material)
+                    key = ec2.import_key_pair(name, to_bytes(key_material))
                 else:
                     '''
                     No material provided, let AWS handle the key creation and
@@ -241,9 +268,6 @@ def main():
     else:
         module.exit_json(changed=changed, key=None)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

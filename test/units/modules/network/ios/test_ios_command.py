@@ -19,52 +19,29 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-import os
 import json
 
-from ansible.compat.tests import unittest
-from ansible.compat.tests.mock import patch, MagicMock
-from ansible.errors import AnsibleModuleExit
+from ansible.compat.tests.mock import patch
 from ansible.modules.network.ios import ios_command
-from ansible.module_utils import basic
-from ansible.module_utils._text import to_bytes
+from units.modules.utils import set_module_args
+from .ios_module import TestIosModule, load_fixture
 
 
-def set_module_args(args):
-    args = json.dumps({'ANSIBLE_MODULE_ARGS': args})
-    basic._ANSIBLE_ARGS = to_bytes(args)
+class TestIosCommandModule(TestIosModule):
 
-fixture_path = os.path.join(os.path.dirname(__file__), 'fixtures')
-fixture_data = {}
-
-def load_fixture(name):
-    path = os.path.join(fixture_path, name)
-
-    if path in fixture_data:
-        return fixture_data[path]
-
-    with open(path) as f:
-        data = f.read()
-
-    try:
-        data = json.loads(data)
-    except:
-        pass
-
-    fixture_data[path] = data
-    return data
-
-
-class test_iosCommandModule(unittest.TestCase):
+    module = ios_command
 
     def setUp(self):
+        super(TestIosCommandModule, self).setUp()
+
         self.mock_run_commands = patch('ansible.modules.network.ios.ios_command.run_commands')
         self.run_commands = self.mock_run_commands.start()
 
     def tearDown(self):
+        super(TestIosCommandModule, self).tearDown()
         self.mock_run_commands.stop()
 
-    def execute_module(self, failed=False, changed=False):
+    def load_fixtures(self, commands=None):
 
         def load_from_file(*args, **kwargs):
             module, commands = args
@@ -81,18 +58,6 @@ class test_iosCommandModule(unittest.TestCase):
             return output
 
         self.run_commands.side_effect = load_from_file
-
-        with self.assertRaises(AnsibleModuleExit) as exc:
-            ios_command.main()
-
-        result = exc.exception.result
-
-        if failed:
-            self.assertTrue(result.get('failed'))
-        else:
-            self.assertEqual(result.get('changed'), changed, result)
-
-        return result
 
     def test_ios_command_simple(self):
         set_module_args(dict(commands=['show version']))

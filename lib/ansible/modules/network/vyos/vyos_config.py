@@ -16,11 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0',
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
@@ -34,6 +33,9 @@ description:
     configuration file and state of the active configuration.   All
     configuration statements are based on `set` and `delete` commands
     in the device configuration.
+extends_documentation_fragment: vyos
+notes:
+  - Tested against VYOS 1.1.7
 options:
   lines:
     description:
@@ -121,27 +123,18 @@ filtered:
   returned: always
   type: list
   sample: ['...', '...']
-start:
-  description: The time the job started
-  returned: always
-  type: str
-  sample: "2016-11-16 10:38:15.126146"
-end:
-  description: The time the job ended
-  returned: always
-  type: str
-  sample: "2016-11-16 10:38:25.595612"
-delta:
-  description: The time elapsed to perform all operations
-  returned: always
-  type: str
-  sample: "0:00:10.469466"
+backup_path:
+  description: The full path to the backup file
+  returned: when backup is yes
+  type: string
+  sample: /playbooks/ansible/backup/vyos_config.2016-07-16@22:28:34
 """
 import re
 
-from ansible.module_utils.local import LocalAnsibleModule
+from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.netcfg import NetworkConfig
 from ansible.module_utils.vyos import load_config, get_config, run_commands
+from ansible.module_utils.vyos import vyos_argument_spec
 
 
 DEFAULT_COMMENT = 'configured by vyos_config'
@@ -235,10 +228,9 @@ def run(module, result):
 
     commit = not module.check_mode
     comment = module.params['comment']
-    save = module.params['save']
 
     if commands:
-        load_config(module, commands, commit=commit, comment=comment, save=save)
+        load_config(module, commands, commit=commit, comment=comment)
 
         if result.get('filtered'):
             result['warnings'].append('Some configuration commands were '
@@ -262,15 +254,19 @@ def main():
         save=dict(type='bool', default=False),
     )
 
+    argument_spec.update(vyos_argument_spec)
+
     mutually_exclusive = [('lines', 'src')]
 
-    module = LocalAnsibleModule(
+    module = AnsibleModule(
         argument_spec=argument_spec,
         mutually_exclusive=mutually_exclusive,
         supports_check_mode=True
     )
 
-    result = dict(changed=False, warnings=[])
+    warnings = list()
+
+    result = dict(changed=False, warnings=warnings)
 
     if module.params['backup']:
         result['__backup__'] = get_config(module=module)
@@ -279,9 +275,11 @@ def main():
         run(module, result)
 
     if module.params['save']:
-        if not module.check_mode:
-            run_commands(module, ['save'])
-        result['changed'] = True
+        diff = run_commands(module, commands=['configure', 'compare saved'])[1]
+        if diff != '[edit]':
+            run_commands(module, commands=['save'])
+            result['changed'] = True
+        run_commands(module, commands=['exit'])
 
     module.exit_json(**result)
 

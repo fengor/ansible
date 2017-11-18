@@ -1,38 +1,33 @@
 #!/usr/bin/python
 #
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'core',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
 module: iosxr_command
 version_added: "2.1"
 author: "Ricardo Carrillo Cruz (@rcarrillocruz)"
-short_description: Run commands on remote devices running Cisco iosxr
+short_description: Run commands on remote devices running Cisco IOS XR
 description:
-  - Sends arbitrary commands to an iosxr node and returns the results
+  - Sends arbitrary commands to an IOS XR node and returns the results
     read from the device. This module includes an
     argument that will cause the module to wait for a specific condition
     before returning or timing out if the condition is not met.
   - This module does not support running commands in configuration mode.
     Please use M(iosxr_config) to configure iosxr devices.
+extends_documentation_fragment: iosxr
+notes:
+  - Tested against IOS XR 6.1.2
 options:
   commands:
     description:
@@ -95,7 +90,7 @@ tasks:
       wait_for: result[0] contains IOS-XR
 
   - name: run multiple commands on remote nodes
-     iosxr_command:
+    iosxr_command:
       commands:
         - show version
         - show interfaces
@@ -113,12 +108,12 @@ tasks:
 RETURN = """
 stdout:
   description: The set of responses from the commands
-  returned: always
+  returned: always apart from low level errors (such as action plugin)
   type: list
   sample: ['...', '...']
 stdout_lines:
   description: The value of stdout split into a list
-  returned: always
+  returned: always apart from low level errors (such as action plugin)
   type: list
   sample: [['...', '...'], ['...'], ['...']]
 failed_conditions:
@@ -126,63 +121,48 @@ failed_conditions:
   returned: failed
   type: list
   sample: ['...', '...']
-start:
-  description: The time the job started
-  returned: always
-  type: str
-  sample: "2016-11-16 10:38:15.126146"
-end:
-  description: The time the job ended
-  returned: always
-  type: str
-  sample: "2016-11-16 10:38:25.595612"
-delta:
-  description: The time elapsed to perform all operations
-  returned: always
-  type: str
-  sample: "0:00:10.469466"
 """
 import time
 
-from ansible.module_utils.local import LocalAnsibleModule
-from ansible.module_utils.iosxr import run_commands
-from ansible.module_utils.network_common import ComplexList
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.iosxr import run_commands, iosxr_argument_spec, check_args
 from ansible.module_utils.netcli import Conditional
+from ansible.module_utils.network_common import ComplexList
 from ansible.module_utils.six import string_types
+from ansible.module_utils._text import to_native
 
-VALID_KEYS = ['command', 'output', 'prompt', 'response']
 
 def to_lines(stdout):
     for item in stdout:
         if isinstance(item, string_types):
-            item = str(item).split('\n')
+            item = to_native(item, errors='surrogate_or_strict').split('\n')
         yield item
+
 
 def parse_commands(module, warnings):
     command = ComplexList(dict(
         command=dict(key=True),
         prompt=dict(),
-        response=dict()
-    ))
+        answer=dict()
+    ), module)
     commands = command(module.params['commands'])
 
-    for index, item in enumerate(commands):
+    for item in list(commands):
         if module.check_mode and not item['command'].startswith('show'):
             warnings.append(
                 'only show commands are supported when using check mode, not '
                 'executing `%s`' % item['command']
             )
+            commands.remove(item)
         elif item['command'].startswith('conf'):
             module.fail_json(
                 msg='iosxr_command does not support running config mode '
                     'commands.  Please use iosxr_config instead'
             )
-        commands[index] = module.jsonify(item)
     return commands
 
 def main():
     spec = dict(
-        # { command: <str>, output: <str>, prompt: <str>, response: <str> }
         commands=dict(type='list', required=True),
 
         wait_for=dict(type='list', aliases=['waitfor']),
@@ -192,10 +172,14 @@ def main():
         interval=dict(default=1, type='int')
     )
 
-    module = LocalAnsibleModule(argument_spec=spec,
+    spec.update(iosxr_argument_spec)
+
+    module = AnsibleModule(argument_spec=spec,
                            supports_check_mode=True)
 
     warnings = list()
+    check_args(module, warnings)
+
     commands = parse_commands(module, warnings)
 
     wait_for = module.params['wait_for'] or list()

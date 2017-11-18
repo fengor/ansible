@@ -2,21 +2,23 @@
 
 set -o pipefail
 
-add-apt-repository 'deb http://archive.ubuntu.com/ubuntu trusty-backports universe'
-add-apt-repository 'ppa:ubuntu-toolchain-r/test'
-add-apt-repository 'ppa:fkrull/deadsnakes'
+shippable.py
 
-apt-get update -qq
-apt-get install -qq \
-    shellcheck \
-    python2.4 \
-    g++-4.9 \
-    python3.6-dev \
+echo '{"verified": false, "results": []}' > test/results/bot/ansible-test-failure.json
 
-ln -sf x86_64-linux-gnu-gcc-4.9 /usr/bin/x86_64-linux-gnu-gcc
+if [ "${BASE_BRANCH:-}" ]; then
+    base_branch="origin/${BASE_BRANCH}"
+else
+    base_branch=""
+fi
+# shellcheck disable=SC2086
+ansible-test compile --failure-ok --color -v --junit --coverage ${CHANGED:+"$CHANGED"} --docker default
+# shellcheck disable=SC2086
+ansible-test sanity  --failure-ok --color -v --junit --coverage ${CHANGED:+"$CHANGED"} --docker default --docker-keep-git --base-branch "${base_branch}"
 
-pip install tox --disable-pip-version-check
+rm test/results/bot/ansible-test-failure.json
 
-ansible-test compile --color -v
-ansible-test sanity --color -v --tox --skip-test ansible-doc --python 2.7
-ansible-test sanity --color -v --tox --test ansible-doc --coverage
+if find test/results/bot/ -mindepth 1 -name '.*' -prune -o -print -quit | grep -q .; then
+    echo "One or more of the above tests reported at least one failure."
+    exit 1
+fi

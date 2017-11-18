@@ -2,8 +2,10 @@
 
 constraints=$(
     grep '.' test/runner/requirements/*.txt \
+        | grep -v '(sanity_ok)$' \
         | sed 's/ *;.*$//; s/ #.*$//' \
         | grep -v '/constraints.txt:' \
+        | grep -v '/integration.cloud.azure.txt:' \
         | grep '[<>=]'
 )
 

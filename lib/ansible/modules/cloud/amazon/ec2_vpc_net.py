@@ -1,22 +1,15 @@
 #!/usr/bin/python
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['stableinterface'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = '''
 ---
@@ -60,7 +53,8 @@ options:
     required: false
   tags:
     description:
-      - The tags you want attached to the VPC. This is independent of the name value, note if you pass a 'Name' key it would override the Name of the VPC if it's different.
+      - The tags you want attached to the VPC. This is independent of the name value, note if you pass a 'Name' key it would override the Name of
+        the VPC if it's different.
     default: None
     required: false
     aliases: [ 'resource_tags' ]
@@ -72,7 +66,8 @@ options:
     choices: [ 'present', 'absent' ]
   multi_ok:
     description:
-      - By default the module will not create another VPC if there is another VPC with the same name and CIDR block. Specify this as true if you want duplicate VPCs created.
+      - By default the module will not create another VPC if there is another VPC with the same name and CIDR block. Specify this as true if you want
+        duplicate VPCs created.
     default: false
     required: false
 
@@ -97,30 +92,64 @@ EXAMPLES = '''
 
 '''
 
+RETURN = '''
+vpc.id:
+    description: VPC resource id
+    returned: success
+    type: string
+    sample: vpc-b883b2c4
+vpc.cidr_block:
+    description: The CIDR of the VPC
+    returned: success
+    type: string
+    sample: "10.0.0.0/16"
+vpc.state:
+    description: state of the VPC
+    returned: success
+    type: string
+    sample: available
+vpc.tags:
+    description: tags attached to the VPC, includes name
+    returned: success
+    type: dict
+    sample: {"Name": "My VPC", "env": "staging"}
+vpc.classic_link_enabled:
+    description: indicates whether ClassicLink is enabled
+    returned: success
+    type: boolean
+    sample: false
+vpc.dhcp_options_id:
+    description: the id of the DHCP options assocaited with this VPC
+    returned: success
+    type: string
+    sample: dopt-67236184
+vpc.instance_tenancy:
+    description: indicates whther VPC uses default or dedicated tenancy
+    returned: success
+    type: string
+    sample: default
+vpc.is_default:
+    description: indicates whether this is the default VPC
+    returned: success
+    type: boolean
+    sample: false
+'''
+
 try:
-    import boto
-    import boto.ec2
     import boto.vpc
-    from boto.exception import BotoServerError
-    HAS_BOTO=True
+    from boto.exception import BotoServerError, NoAuthHandlerFound
 except ImportError:
-    HAS_BOTO=False
+    pass  # Taken care of by ec2.HAS_BOTO
 
-def boto_exception(err):
-    '''generic error message handler'''
-    if hasattr(err, 'error_message'):
-        error = err.error_message
-    elif hasattr(err, 'message'):
-        error = err.message
-    else:
-        error = '%s: %s' % (Exception, err)
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import (HAS_BOTO, AnsibleAWSError, boto_exception, connect_to_aws,
+                                      ec2_argument_spec, get_aws_connection_info)
 
-    return error
 
 def vpc_exists(module, vpc, name, cidr_block, multi):
-    """Returns True or False in regards to the existence of a VPC. When supplied
+    """Returns None or a vpc object depending on the existence of a VPC. When supplied
     with a CIDR, it will check for matching tags to determine if it is a match
-    otherwise it will assume the VPC does not exist and thus return false.
+    otherwise it will assume the VPC does not exist and thus return None.
     """
     matched_vpc = None
 
@@ -130,11 +159,12 @@ def vpc_exists(module, vpc, name, cidr_block, multi):
         e_msg=boto_exception(e)
         module.fail_json(msg=e_msg)
 
-    if len(matching_vpcs) == 1:
+    if multi:
+        return None
+    elif len(matching_vpcs) == 1:
         matched_vpc = matching_vpcs[0]
     elif len(matching_vpcs) > 1:
-        if multi:
-            module.fail_json(msg='Currently there are %d VPCs that have the same name and '
+        module.fail_json(msg='Currently there are %d VPCs that have the same name and '
                              'CIDR block you specified. If you would like to create '
                              'the VPC anyway please pass True to the multi_ok param.' % len(matching_vpcs))
 
@@ -149,7 +179,7 @@ def update_vpc_tags(vpc, module, vpc_obj, tags, name):
     tags.update({'Name': name})
     try:
         current_tags = dict((t.name, t.value) for t in vpc.get_all_tags(filters={'resource-id': vpc_obj.id}))
-        if cmp(tags, current_tags):
+        if tags != current_tags:
             if not module.check_mode:
                 vpc.create_tags(vpc_obj.id, tags)
             return True
@@ -223,13 +253,13 @@ def main():
     if region:
         try:
             connection = connect_to_aws(boto.vpc, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, AnsibleAWSError) as e:
+        except (NoAuthHandlerFound, AnsibleAWSError) as e:
             module.fail_json(msg=str(e))
     else:
         module.fail_json(msg="region must be specified")
 
     if dns_hostnames and not dns_support:
-        module.fail_json('In order to enable DNS Hostnames you must also enable DNS support')
+        module.fail_json(msg='In order to enable DNS Hostnames you must also enable DNS support')
 
     if state == 'present':
 
@@ -299,9 +329,6 @@ def main():
 
         module.exit_json(changed=changed, vpc=get_vpc_values(vpc_obj))
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

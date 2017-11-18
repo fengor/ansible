@@ -16,11 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
@@ -33,64 +32,51 @@ description:
     on Cisco IOS devices.  It provides an option to configure host system
     parameters or remove those parameters from the device active
     configuration.
+extends_documentation_fragment: ios
+notes:
+  - Tested against IOS 15.6
 options:
   hostname:
     description:
-      - The C(hostname) argument will configure the device hostname
-        parameter on Cisco IOS devices.  The C(hostname) value is an
-        ASCII string value.
-    required: false
-    default: null
+      - Configure the device hostname parameter. This option takes an ASCII string value.
   domain_name:
     description:
-      - The C(description) argument will configure the IP domain name
-        on the remote device to the provided value.  The C(domain_name)
-        argument should be in the dotted name form and will be
+      - Configure the IP domain name
+        on the remote device to the provided value. Value
+        should be in the dotted name form and will be
         appended to the C(hostname) to create a fully-qualified
-        domain name
-    required: false
-    default: null
+        domain name.
   domain_search:
     description:
-      - The C(domain_list) provides the list of domain suffixes to
+      - Provides the list of domain suffixes to
         append to the hostname for the purpose of doing name resolution.
         This argument accepts a list of names and will be reconciled
         with the current active configuration on the running node.
-    required: false
-    default: null
   lookup_source:
     description:
-      - The C(lookup_source) argument provides one or more source
+      - Provides one or more source
         interfaces to use for performing DNS lookups.  The interface
         provided in C(lookup_source) must be a valid interface configured
         on the device.
-    required: false
-    default: null
   lookup_enabled:
     description:
-      - The C(lookup_enabled) argument provides administrative control
+      - Administrative control
         for enabling or disabling DNS lookups.  When this argument is
         set to True, lookups are performed and when it is set to False,
         lookups are not performed.
-    required: false
-    default: null
-    choices: ['true', 'false']
+    type: bool
   name_servers:
     description:
-      - The C(name_serves) argument accepts a list of DNS name servers by
-        way of either FQDN or IP address to use to perform name resolution
-        lookups.  This argument accepts wither a list of DNS servers See
+      - List of DNS name servers by IP address to use to perform name resolution
+        lookups.  This argument accepts either a list of DNS servers See
         examples.
-    required: false
-    default: null
   state:
     description:
-      - The C(state) argument configures the state of the configuration
+      - State of the configuration
         values in the device's current active configuration.  When set
         to I(present), the values should be configured in the device active
         configuration and when set to I(absent) the values should not be
         in the device active configuration
-    required: false
     default: present
     choices: ['present', 'absent']
 """
@@ -99,18 +85,21 @@ EXAMPLES = """
 - name: configure hostname and domain name
   ios_system:
     hostname: ios01
-    domain_name: eng.ansible.com
+    domain_name: test.example.com
     domain-search:
       - ansible.com
       - redhat.com
       - cisco.com
+
 - name: remove configuration
   ios_system:
     state: absent
+
 - name: configure DNS lookup sources
   ios_system:
     lookup_source: MgmtEth0/0/CPU0/0
     lookup_enabled: yes
+
 - name: configure name servers
   ios_system:
     name_servers:
@@ -125,27 +114,13 @@ commands:
   type: list
   sample:
     - hostname ios01
-    - ip domain name eng.ansible.com
-start:
-  description: The time the job started
-  returned: always
-  type: str
-  sample: "2016-11-16 10:38:15.126146"
-end:
-  description: The time the job ended
-  returned: always
-  type: str
-  sample: "2016-11-16 10:38:25.595612"
-delta:
-  description: The time elapsed to perform all operations
-  returned: always
-  type: str
-  sample: "0:00:10.469466"
+    - ip domain name test.example.com
 """
 import re
 
-from ansible.module_utils.local import LocalAnsibleModule
+from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.ios import get_config, load_config
+from ansible.module_utils.ios import ios_argument_spec, check_args
 from ansible.module_utils.network_common import ComplexList
 
 _CONFIGURED_VRFS = None
@@ -171,7 +146,7 @@ def map_obj_to_commands(want, have, module):
     commands = list()
     state = module.params['state']
 
-    needs_update = lambda x: want.get(x) and (want.get(x) != have.get(x))
+    needs_update = lambda x: want.get(x) is not None and (want.get(x) != have.get(x))
 
     if state == 'absent':
         if have['hostname'] != 'Router':
@@ -291,12 +266,13 @@ def parse_domain_search(config):
     return matches
 
 def parse_name_servers(config):
-    match = re.findall('^ip name-server (?:vrf (\S+) )*(\S+)', config, re.M)
+    match = re.findall('^ip name-server (?:vrf (\S+) )*(.*)', config, re.M)
     matches = list()
-    for vrf, server in match:
+    for vrf, servers in match:
         if not vrf:
             vrf = None
-        matches.append({'server': server, 'vrf': vrf})
+        for server in servers.split():
+            matches.append({'server': server, 'vrf': vrf})
     return matches
 
 def parse_lookup_source(config):
@@ -325,17 +301,17 @@ def map_params_to_obj(module):
     domain_name = ComplexList(dict(
         name=dict(key=True),
         vrf=dict()
-    ))
+    ), module)
 
     domain_search = ComplexList(dict(
         name=dict(key=True),
         vrf=dict()
-    ))
+    ), module)
 
     name_servers = ComplexList(dict(
         server=dict(key=True),
         vrf=dict()
-    ))
+    ), module)
 
     for arg, cast in [('domain_name', domain_name),
                       ('domain_search', domain_search),
@@ -364,10 +340,16 @@ def main():
         state=dict(choices=['present', 'absent'], default='present')
     )
 
-    module = LocalAnsibleModule(argument_spec=argument_spec,
-                                supports_check_mode=True)
+    argument_spec.update(ios_argument_spec)
+
+    module = AnsibleModule(argument_spec=argument_spec,
+                           supports_check_mode=True)
 
     result = {'changed': False}
+
+    warnings = list()
+    check_args(module, warnings)
+    result['warnings'] = warnings
 
     want = map_params_to_obj(module)
     have = map_config_to_obj(module)

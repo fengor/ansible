@@ -1,29 +1,24 @@
 #!/usr/bin/python
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['stableinterface'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = '''
 ---
 module: ec2_vol
 short_description: create and attach a volume, return volume id and device map
 description:
-    - creates an EBS volume and optionally attaches it to an instance.  If both an instance ID and a device name is given and the instance has a device at the device name, then no volume is created and no attachment is made.  This module has a dependency on python-boto.
+    - creates an EBS volume and optionally attaches it to an instance.
+      If both an instance ID and a device name is given and the instance has a device at the device name, then no volume is created and no attachment is made.
+      This module has a dependency on python-boto.
 version_added: "1.1"
 options:
   instance:
@@ -50,7 +45,8 @@ options:
     default: null
   volume_type:
     description:
-      - Type of EBS volume; standard (magnetic), gp2 (SSD), io1 (Provisioned IOPS), st1 (Throughput Optimized HDD), sc1 (Cold HDD). "Standard" is the old EBS default and continues to remain the Ansible default for backwards compatibility.
+      - Type of EBS volume; standard (magnetic), gp2 (SSD), io1 (Provisioned IOPS), st1 (Throughput Optimized HDD), sc1 (Cold HDD).
+        "Standard" is the old EBS default and continues to remain the Ansible default for backwards compatibility.
     required: false
     default: standard
     version_added: "1.9"
@@ -108,6 +104,12 @@ options:
     default: present
     choices: ['absent', 'present', 'list']
     version_added: "1.6"
+  tags:
+    description:
+      - tag:value pairs to add to the volume after creation
+    required: false
+    default: {}
+    version_added: "2.3"
 author: "Lester Wade (@lwade)"
 extends_documentation_fragment:
     - aws
@@ -141,7 +143,7 @@ EXAMPLES = '''
     count: 3
   register: ec2
 - ec2_vol:
-    instance: "{{ item.id }} "
+    instance: "{{ item.id }}"
     volume_size: 5
   with_items: "{{ ec2.instances }}"
   register: ec2_vol
@@ -245,12 +247,17 @@ import time
 from distutils.version import LooseVersion
 
 try:
+    import boto
     import boto.ec2
+    import boto.exception
     from boto.exception import BotoServerError
     from boto.ec2.blockdevicemapping import BlockDeviceType, BlockDeviceMapping
-    HAS_BOTO = True
 except ImportError:
-    HAS_BOTO = False
+    pass  # Taken care of by ec2.HAS_BOTO
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import (HAS_BOTO, AnsibleAWSError, connect_to_aws, ec2_argument_spec,
+                                      get_aws_connection_info)
 
 
 def get_volume(module, ec2):
@@ -341,6 +348,7 @@ def create_volume(module, ec2, zone):
     volume_size = module.params.get('volume_size')
     volume_type = module.params.get('volume_type')
     snapshot = module.params.get('snapshot')
+    tags = module.params.get('tags')
     # If custom iops is defined we use volume_type "io1" rather than the default of "standard"
     if iops:
         volume_type = 'io1'
@@ -363,7 +371,9 @@ def create_volume(module, ec2, zone):
                 volume.update()
 
             if name:
-                ec2.create_tags([volume.id], {"Name": name})
+                tags["Name"] = name
+            if tags:
+                ec2.create_tags([volume.id], tags)
         except boto.exception.BotoServerError as e:
             module.fail_json(msg = "%s: %s" % (e.error_code, e.error_message))
 
@@ -484,9 +494,9 @@ def get_volume_info(volume, state):
             'device': attachment.device,
             'instance_id': attachment.instance_id,
             'status': attachment.status
-            },
+        },
         'tags': volume.tags
-        }
+    }
     if hasattr(attachment, 'deleteOnTermination'):
         volume_info['attachment_set']['deleteOnTermination'] = attachment.deleteOnTermination
 
@@ -508,7 +518,8 @@ def main():
         delete_on_termination = dict(type='bool', default=False),
         zone = dict(aliases=['availability_zone', 'aws_zone', 'ec2_zone']),
         snapshot = dict(),
-        state = dict(choices=['absent', 'present', 'list'], default='present')
+        state = dict(choices=['absent', 'present', 'list'], default='present'),
+        tags = dict(type='dict', default={})
     )
     )
     module = AnsibleModule(argument_spec=argument_spec)
@@ -526,6 +537,7 @@ def main():
     zone = module.params.get('zone')
     snapshot = module.params.get('snapshot')
     state = module.params.get('state')
+    tags = module.params.get('tags')
 
     # Ensure we have the zone or can get the zone
     if instance is None and zone is None and state == 'present':
@@ -594,8 +606,8 @@ def main():
     if not volume_size and not (id or name or snapshot):
         module.fail_json(msg="You must specify volume_size or identify an existing volume by id, name, or snapshot")
 
-    if volume_size and (id or snapshot):
-        module.fail_json(msg="Cannot specify volume_size together with id or snapshot")
+    if volume_size and id:
+        module.fail_json(msg="Cannot specify volume_size together with id")
 
     if state == 'present':
         volume, changed = create_volume(module, ec2, zone)
@@ -606,13 +618,20 @@ def main():
 
         # Add device, volume_id and volume_type parameters separately to maintain backward compatibility
         volume_info = get_volume_info(volume, state)
-        module.exit_json(changed=changed, volume=volume_info, device=volume_info['attachment_set']['device'], volume_id=volume_info['id'], volume_type=volume_info['type'])
+
+        # deleteOnTermination is not correctly reflected on attachment
+        if module.params.get('delete_on_termination'):
+            for attempt in range(0, 8):
+                if volume_info['attachment_set'].get('deleteOnTermination') == 'true':
+                    break
+                time.sleep(5)
+                volume = ec2.get_all_volumes(volume_ids=volume.id)[0]
+                volume_info = get_volume_info(volume, state)
+        module.exit_json(changed=changed, volume=volume_info, device=volume_info['attachment_set']['device'],
+                         volume_id=volume_info['id'], volume_type=volume_info['type'])
     elif state == 'absent':
         delete_volume(module, ec2)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

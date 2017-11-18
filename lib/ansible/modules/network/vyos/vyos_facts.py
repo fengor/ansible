@@ -15,24 +15,26 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0',
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
 module: vyos_facts
 version_added: "2.2"
 author: "Nathaniel Case (@qalthos)"
-short_description: Collect facts from remote devices running OS
+short_description: Collect facts from remote devices running VyOS
 description:
   - Collects a base set of device facts from a remote device that
     is running VyOS.  This module prepends all of the
     base network fact keys with U(ansible_net_<fact>).  The facts
     module will always collect a base set of facts from the device
     and can enable or disable collection of additional facts.
+extends_documentation_fragment: vyos
+notes:
+  - Tested against VYOS 1.1.7
 options:
   gather_subset:
     description:
@@ -96,9 +98,10 @@ ansible_net_gather_subset:
 """
 import re
 
-from ansible.module_utils.local import LocalAnsibleModule
+from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.six import iteritems
 from ansible.module_utils.vyos import run_commands
+from ansible.module_utils.vyos import vyos_argument_spec
 
 
 class FactsBase(object):
@@ -209,6 +212,8 @@ class Neighbors(FactsBase):
                 if values:
                     parsed.append(values)
                 values = line
+        if values:
+            parsed.append(values)
         return parsed
 
     def parse_neighbors(self, data):
@@ -251,7 +256,12 @@ def main():
         gather_subset=dict(default=['!config'], type='list')
     )
 
-    module = LocalAnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
+    argument_spec.update(vyos_argument_spec)
+
+    module = AnsibleModule(argument_spec=argument_spec,
+                           supports_check_mode=True)
+
+    warnings = list()
 
     gather_subset = module.params['gather_subset']
 
@@ -303,7 +313,7 @@ def main():
         key = 'ansible_net_%s' % key
         ansible_facts[key] = value
 
-    module.exit_json(ansible_facts=ansible_facts)
+    module.exit_json(ansible_facts=ansible_facts, warnings=warnings)
 
 
 if __name__ == '__main__':

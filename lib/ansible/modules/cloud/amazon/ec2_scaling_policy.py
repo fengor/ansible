@@ -1,22 +1,15 @@
 #!/usr/bin/python
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['stableinterface'],
+                    'supported_by': 'certified'}
+
 
 DOCUMENTATION = """
 module: ec2_scaling_policy
@@ -74,17 +67,17 @@ EXAMPLES = '''
     cooldown: 300
 '''
 
-
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
-
 try:
     import boto.ec2.autoscale
+    import boto.exception
     from boto.ec2.autoscale import ScalingPolicy
     from boto.exception import BotoServerError
-    HAS_BOTO = True
 except ImportError:
-    HAS_BOTO = False
+    pass  # Taken care of by ec2.HAS_BOTO
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import (AnsibleAWSError, HAS_BOTO, connect_to_aws, ec2_argument_spec,
+                                      get_aws_connection_info)
 
 
 def create_scaling_policy(connection, module):
@@ -109,7 +102,8 @@ def create_scaling_policy(connection, module):
         try:
             connection.create_scaling_policy(sp)
             policy = connection.get_all_policies(as_group=asg_name,policy_names=[sp_name])[0]
-            module.exit_json(changed=True, name=policy.name, arn=policy.policy_arn, as_name=policy.as_name, scaling_adjustment=policy.scaling_adjustment, cooldown=policy.cooldown, adjustment_type=policy.adjustment_type, min_adjustment_step=policy.min_adjustment_step)
+            module.exit_json(changed=True, name=policy.name, arn=policy.policy_arn, as_name=policy.as_name, scaling_adjustment=policy.scaling_adjustment,
+                             cooldown=policy.cooldown, adjustment_type=policy.adjustment_type, min_adjustment_step=policy.min_adjustment_step)
         except BotoServerError as e:
             module.fail_json(msg=str(e))
     else:
@@ -136,7 +130,8 @@ def create_scaling_policy(connection, module):
             if changed:
                 connection.create_scaling_policy(policy)
                 policy = connection.get_all_policies(as_group=asg_name,policy_names=[sp_name])[0]
-            module.exit_json(changed=changed, name=policy.name, arn=policy.policy_arn, as_name=policy.as_name, scaling_adjustment=policy.scaling_adjustment, cooldown=policy.cooldown, adjustment_type=policy.adjustment_type, min_adjustment_step=policy.min_adjustment_step)
+            module.exit_json(changed=changed, name=policy.name, arn=policy.policy_arn, as_name=policy.as_name, scaling_adjustment=policy.scaling_adjustment,
+                             cooldown=policy.cooldown, adjustment_type=policy.adjustment_type, min_adjustment_step=policy.min_adjustment_step)
         except BotoServerError as e:
             module.fail_json(msg=str(e))
 
